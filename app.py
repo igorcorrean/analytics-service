@@ -31,7 +31,7 @@ if not all([AWS_REGION, SQS_QUEUE_URL, DYNAMODB_TABLE_NAME]):
 try:
     session = boto3.Session(region_name=AWS_REGION)
     sqs_client = session.client("sqs")
-    dynamodb_client = session.client("dynamodb")
+    dynamodb_client = session.client("dynamodb", endpoint_url="http://dynamodb-local:8000")# Usando DynamoDB Local
     log.info(f"Clientes Boto3 inicializados na região {AWS_REGION}")
 except NoCredentialsError:
     log.critical("Credenciais da AWS não encontradas. Verifique seu ambiente.")
@@ -54,7 +54,7 @@ def process_message(message):
         
         # Constrói o item no formato do DynamoDB
         item = {
-            'event_id': {'S': event_id},
+            'id': {'S': event_id},
             'user_id': {'S': body['user_id']},
             'flag_name': {'S': body['flag_name']},
             'result': {'BOOL': body['result']},
