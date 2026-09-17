@@ -3,8 +3,6 @@ name: 🚀 CI/CD DevSecOps - Analytics Service
 on:
   push:
     branches: [ main]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 env:
