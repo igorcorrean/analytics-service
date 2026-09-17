@@ -98,7 +98,6 @@ jobs:
     name: 🐳 Docker Build, Scan & Push ECR
     runs-on: ubuntu-latest
     needs: security-sast-sca
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
       - name: 📥 Checkout do Código
