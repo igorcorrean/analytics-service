@@ -11,6 +11,10 @@ from flask import Flask, jsonify, request, g
 from dotenv import load_dotenv
 from time import perf_counter
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Summary, generate_latest
+from opentelemetry import propagate, trace
+from opentelemetry.trace import Status, StatusCode
+from opentelemetry.trace import SpanKind
+from observability import configure_tracing
 
 # Configura o logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -83,7 +87,10 @@ def process_message(message):
         )
         analytics_messages.labels('success').inc()
         
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
+        span = trace.get_current_span()
+        span.record_exception(e)
+        span.set_status(Status(StatusCode.ERROR, "invalid SQS message JSON"))
         analytics_messages.labels('invalid_message').inc()
         log.error(f"Poison Pill detectada! Erro ao decodificar JSON da mensagem ID: {message['MessageId']}. Descartando da fila.")
         # Se o formato é inválido, deletamos para não travar o worker em loop eterno
@@ -92,9 +99,15 @@ def process_message(message):
             ReceiptHandle=message['ReceiptHandle']
         )
     except ClientError as e:
+        span = trace.get_current_span()
+        span.record_exception(e)
+        span.set_status(Status(StatusCode.ERROR, str(e)))
         analytics_messages.labels('aws_error').inc()
         log.error(f"Erro do Boto3 (DynamoDB ou SQS) ao processar {message['MessageId']}: {e}")
     except Exception as e:
+        span = trace.get_current_span()
+        span.record_exception(e)
+        span.set_status(Status(StatusCode.ERROR, str(e)))
         analytics_messages.labels('error').inc()
         log.error(f"Erro inesperado ao processar {message['MessageId']}: {e}")
 
@@ -106,7 +119,8 @@ def sqs_worker_loop():
             response = sqs_client.receive_message(
                 QueueUrl=SQS_QUEUE_URL,
                 MaxNumberOfMessages=10,
-                WaitTimeSeconds=20
+                WaitTimeSeconds=20,
+                MessageAttributeNames=['All'],
             )
             
             messages = response.get('Messages', [])
@@ -116,7 +130,18 @@ def sqs_worker_loop():
             log.info(f"Recebidas {len(messages)} mensagens.")
             
             for message in messages:
-                process_message(message)
+                carrier = {
+                    name: attribute['StringValue']
+                    for name, attribute in message.get('MessageAttributes', {}).items()
+                    if 'StringValue' in attribute
+                }
+                context = propagate.extract(carrier)
+                with trace.get_tracer("analytics-service").start_as_current_span(
+                    "sqs.process_message",
+                    context=context,
+                    kind=SpanKind.CONSUMER,
+                ):
+                    process_message(message)
                 
         except ClientError as e:
             log.error(f"Erro de comunicação com a AWS SQS: {e}")
@@ -128,6 +153,7 @@ def sqs_worker_loop():
 # --- Servidor Flask para Health Check (Kubernetes Probes) ---
 
 app = Flask(__name__)
+configure_tracing(app, "analytics-service")
 
 http_requests = Counter(
     'http_requests_total', 'Total number of HTTP requests',

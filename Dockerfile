@@ -23,7 +23,7 @@ ENV PYTHONUNBUFFERED=1
 COPY --from=builder /root/.local /root/.local
 
 # Copia o código-fonte da aplicação
-COPY app.py .
+COPY app.py observability.py ./
 
 # Expõe a porta do Health Check configurada no .env
 EXPOSE 8005
