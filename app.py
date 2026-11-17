@@ -7,8 +7,10 @@ import time
 import logging
 import boto3
 from botocore.exceptions import NoCredentialsError, ClientError
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request, g
 from dotenv import load_dotenv
+from time import perf_counter
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Summary, generate_latest
 
 # Configura o logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -79,8 +81,10 @@ def process_message(message):
             QueueUrl=SQS_QUEUE_URL,
             ReceiptHandle=message['ReceiptHandle']
         )
+        analytics_messages.labels('success').inc()
         
     except json.JSONDecodeError:
+        analytics_messages.labels('invalid_message').inc()
         log.error(f"Poison Pill detectada! Erro ao decodificar JSON da mensagem ID: {message['MessageId']}. Descartando da fila.")
         # Se o formato é inválido, deletamos para não travar o worker em loop eterno
         sqs_client.delete_message(
@@ -88,8 +92,10 @@ def process_message(message):
             ReceiptHandle=message['ReceiptHandle']
         )
     except ClientError as e:
+        analytics_messages.labels('aws_error').inc()
         log.error(f"Erro do Boto3 (DynamoDB ou SQS) ao processar {message['MessageId']}: {e}")
     except Exception as e:
+        analytics_messages.labels('error').inc()
         log.error(f"Erro inesperado ao processar {message['MessageId']}: {e}")
 
 def sqs_worker_loop():
@@ -122,6 +128,39 @@ def sqs_worker_loop():
 # --- Servidor Flask para Health Check (Kubernetes Probes) ---
 
 app = Flask(__name__)
+
+http_requests = Counter(
+    'http_requests_total', 'Total number of HTTP requests',
+    ('service', 'method', 'route', 'status'),
+)
+http_request_duration = Summary(
+    'http_request_duration_seconds', 'HTTP request duration in seconds',
+    ('service', 'method', 'route'),
+)
+analytics_messages = Counter(
+    'analytics_messages_total', 'Analytics messages processed by outcome', ('outcome',),
+)
+
+
+@app.before_request
+def start_request_timer():
+    g.start_time = perf_counter()
+
+
+@app.after_request
+def record_request_metrics(response):
+    if request.path != '/metrics':
+        route = request.url_rule.rule if request.url_rule else 'unmatched'
+        method = request.method if request.method in {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'} else 'OTHER'
+        labels = ('analytics-service', method, route)
+        http_requests.labels(*labels, str(response.status_code)).inc()
+        http_request_duration.labels(*labels).observe(perf_counter() - g.start_time)
+    return response
+
+
+@app.route('/metrics')
+def metrics():
+    return generate_latest(), 200, {'Content-Type': CONTENT_TYPE_LATEST}
 
 @app.route('/health')
 def health():
