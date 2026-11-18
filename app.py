@@ -35,6 +35,11 @@ if not all([SQS_QUEUE_URL, DYNAMODB_TABLE_NAME]):
 # --- Clientes Boto3 ---
 try:
     session = boto3.Session(region_name=AWS_REGION)
+    credentials = session.get_credentials()
+    if credentials is None:
+        raise NoCredentialsError()
+    credentials.get_frozen_credentials()
+
     sqs_client = session.client("sqs")
     
     # Se houver URL local definida, usa (para dev). Caso contrário, usa o DynamoDB oficial da nuvem AWS.

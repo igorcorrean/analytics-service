@@ -67,6 +67,27 @@ gunicorn --bind 0.0.0.0:8005 app:app
 ```
 O servidor estará rodando em `http://localhost:8005`. Você verá logs no terminal assim que o worker SQS iniciar e (eventualmente) processar mensagens.
 
+## ☸️ Credenciais no Kubernetes
+
+O Deployment importa o Secret `analytics-service-secret`. Esse Secret precisa conter
+`AWS_ACCESS_KEY_ID` e `AWS_SECRET_ACCESS_KEY`; em sessões temporárias, como AWS Academy,
+também precisa conter `AWS_SESSION_TOKEN`. Não coloque esses valores em manifests
+versionados.
+
+Com as três variáveis exportadas no terminal, atualize o Secret e reinicie o Deployment:
+
+```bash
+kubectl -n togglemaster create secret generic analytics-service-secret \
+  --from-literal=AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+  --from-literal=AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+  --from-literal=AWS_SESSION_TOKEN="$AWS_SESSION_TOKEN" \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n togglemaster rollout restart deployment/analytics-service
+```
+
+O serviço verifica a disponibilidade das credenciais ao iniciar. Se estiver usando IRSA,
+associe a IAM Role à ServiceAccount do pod em vez de fornecer chaves no Secret.
+
 ## 🧪 Testando o Serviço
 
 Testar este serviço é diferente. Você não vai chamar uma API dele.
