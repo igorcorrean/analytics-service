@@ -118,8 +118,7 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           docker build --platform linux/amd64 \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }} \
-            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }} .
 
       # 2º Passo: Scan da imagem Docker gerada antes do envio ao ECR
       - name: 🛡️ Container Vulnerability Scan (Trivy)
@@ -136,7 +135,6 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ env.IMAGE_TAG }}
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
 
   # =========================================================================
   # JOB 4: Atualização Automática no Repositório de GitOps (CD)
